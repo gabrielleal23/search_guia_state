@@ -2,6 +2,9 @@ from fastapi import FastAPI
 from playwright.sync_api import sync_playwright
 
 app = FastAPI()
+@app.get("/")
+def home():
+    return {"message": "El servidor está encendido"}
 
 @app.get("/rastrear/{guia}")
 def rastrear_servientrega(guia: str):
