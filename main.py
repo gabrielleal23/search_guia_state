@@ -12,26 +12,31 @@ def rastrear_servientrega(guia: str):
         # Iniciamos el navegador (modo sin interfaz para ahorrar recursos)
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        
         try:
-            # 1. Vamos a la URL
-            page.goto("https://www.servientrega.com/wps/portal/rastreo-envio", timeout=60000)
+            # 1. Navegamos a la URL con espera de carga de red
+            page.goto("https://www.servientrega.com/wps/portal/rastreo-envio", timeout=60000, wait_until="networkidle")
             
-            # 2. Llenamos el campo y buscamos
+            # 2. Llenamos el número de guía
+            page.wait_for_selector('input#txtGuia', timeout=10000)
             page.fill('input#txtGuia', guia)
+            
+            # 3. Hacemos clic en consultar
             page.click('button#btnConsultar')
             
-            # 3. Esperamos el resultado (ajusta el selector según la tabla)
-            page.wait_for_selector('.table-responsive', timeout=10000)
+            # 4. Esperamos específicamente por el ID del estado actual
+            # Usamos el prefijo '#' para indicar que es un ID de CSS
+            page.wait_for_selector('#lblEstadoActual', timeout=20000)
             
-            # 4. Extraemos el estado de la primera fila
-            # Nota: Servientrega suele poner el estado en la columna 4
-            estado = page.locator('table.table >> tr >> td').nth(3).inner_text()
+            # 5. Extraemos el texto
+            estado = page.locator('#lblEstadoActual').inner_text()
             
             return {"status": "success", "guia": guia, "resultado": estado.strip()}
         
         except Exception as e:
-            return {"status": "error", "message": "No se pudo encontrar la guía o la página tardó mucho."}
+            # Imprimimos el error en los logs de Railway para debuguear
+            print(f"Error en scraping: {e}")
+            return {"status": "error", "message": "No se encontró el estado o la guía es inválida."}
+        
         
         finally:
             browser.close()
