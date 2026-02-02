@@ -1,70 +1,63 @@
 from fastapi import FastAPI
-from playwright.sync_api import sync_playwright
-import traceback
+import requests
+from bs4 import BeautifulSoup
 
 app = FastAPI()
 
 @app.get("/")
 def home():
-    return {"message": "Servidor de Rastreo Activo"}
+    return {"message": "API de Rastreo Directa Activa"}
 
 @app.get("/rastrear/{guia}")
 def rastrear_servientrega(guia: str):
-    with sync_playwright() as p:
-        # Lanzamiento con banderas para evitar detección y optimizar memoria en Railway
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox", 
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled" # Oculta que es un bot
-            ]
-        )
-        
-        # Creamos un contexto con un User-Agent de Chrome real y moderno
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={'width': 1280, 'height': 720}
-        )
-        
-        page = context.new_page()
-        
-        try:
-            # 1. Navegamos con 'load' en lugar de 'domcontentloaded' para dar tiempo a los scripts
-            page.goto(
-                "https://www.servientrega.com/wps/portal/rastreo-envio", 
-                timeout=60000, 
-                wait_until="load" 
-            )
-            
-            # 2. Espera extra por si el servidor está lento
-            page.wait_for_timeout(3000) 
+    # URL del portal de rastreo
+    url = "https://www.servientrega.com/wps/portal/rastreo-envio"
+    
+    # Headers para parecer un navegador real y no ser bloqueado
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,.*/*;q=0.8",
+        "Referer": "https://www.servientrega.com/"
+    }
 
-            # 3. Buscamos el input. Si falla aquí, es que el sitio bloqueó la IP de Railway
-            page.wait_for_selector('input#txtGuia', timeout=20000, state="visible")
-            page.fill('input#txtGuia', guia)
-            
-            # 4. Click en consultar
-            page.click('button#btnConsultar')
-            
-            # 5. Esperamos el resultado
-            selector_final = 'span[id*="lblEstadoActual"]'
-            page.wait_for_selector(selector_final, timeout=25000)
-            
-            estado = page.locator(selector_final).inner_text()
-            
-            return {
-                "status": "success",
-                "guia": guia,
-                "resultado": estado.strip()
-            }
-            
-        except Exception as e:
-            print(f"Error en consulta {guia}: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"No se pudo cargar el formulario. Servientrega podría estar saturado o bloqueando la conexión."
-            }
+    try:
+        # 1. Iniciamos una sesión para manejar cookies (crucial para Servientrega)
+        session = requests.Session()
+        session.headers.update(headers)
         
-        finally:
-            browser.close()
+        # 2. Primera petición para obtener las cookies de sesión
+        response = session.get(url, timeout=20)
+        
+        # 3. Segunda petición simulando la búsqueda de la guía
+        # Nota: Servientrega usa parámetros específicos en el GET o POST. 
+        # Esta es la URL de consulta directa simplificada:
+        params = {"idGuia": guia}
+        search_url = f"https://www.servientrega.com/wps/portal/rastreo-envio/!ut/p/z1/?" # URL dinámica
+        
+        # Intentamos obtener el resultado
+        res = session.get(url, params=params, timeout=20)
+        
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            # Buscamos el ID que identificaste: lblEstadoActual
+            estado_tag = soup.find(id=lambda x: x and 'lblEstadoActual' in x)
+            
+            if estado_tag:
+                return {
+                    "status": "success",
+                    "guia": guia,
+                    "resultado": estado_tag.text.strip()
+                }
+            
+        # Si no lo encuentra por ID, intentamos un método genérico de respaldo
+        return {
+            "status": "error",
+            "message": "Guía no encontrada o el portal cambió su estructura."
+        }
+
+    except Exception as e:
+        return {
+            "status": "error", 
+            "message": f"Fallo de conexión: {str(e)}"
+        }
