@@ -1,42 +1,66 @@
 from fastapi import FastAPI
 from playwright.sync_api import sync_playwright
+import traceback
 
 app = FastAPI()
+
 @app.get("/")
 def home():
-    return {"message": "El servidor está encendido"}
+    return {"message": "El servidor de rastreo está activo"}
 
 @app.get("/rastrear/{guia}")
 def rastrear_servientrega(guia: str):
+    # Iniciamos Playwright
     with sync_playwright() as p:
-        # Iniciamos el navegador (modo sin interfaz para ahorrar recursos)
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        # Argumentos necesarios para entornos como Railway/Docker
+        browser = p.chromium.launch(
+            headless=True, 
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
+        )
+        
+        # Configuramos un User-Agent real para evitar ser detectados como bot
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        
+        page = context.new_page()
+        
         try:
-            # 1. Navegamos a la URL con espera de carga de red
+            # 1. Vamos a la URL de Servientrega
+            # 'networkidle' espera a que no haya tráfico de red (página cargada)
             page.goto("https://www.servientrega.com/wps/portal/rastreo-envio", timeout=60000, wait_until="networkidle")
             
-            # 2. Llenamos el número de guía
-            page.wait_for_selector('input#txtGuia', timeout=10000)
+            # 2. Llenamos el campo de guía
+            page.wait_for_selector('input#txtGuia', timeout=15000)
             page.fill('input#txtGuia', guia)
             
-            # 3. Hacemos clic en consultar
+            # 3. Hacemos clic en el botón de consulta
             page.click('button#btnConsultar')
             
-            # 4. Esperamos específicamente por el ID del estado actual
-            # Usamos el prefijo '#' para indicar que es un ID de CSS
-            page.wait_for_selector('#lblEstadoActual', timeout=20000)
+            # 4. Esperamos el elemento del estado
+            # Usamos un selector que busca el ID que mencionaste
+            selector_estado = 'span[id*="lblEstadoActual"]'
+            page.wait_for_selector(selector_estado, timeout=20000)
             
-            # 5. Extraemos el texto
-            estado = page.locator('#lblEstadoActual').inner_text()
+            # 5. Extraemos el texto del resultado
+            estado = page.locator(selector_estado).inner_text()
             
-            return {"status": "success", "guia": guia, "resultado": estado.strip()}
+            return {
+                "status": "success", 
+                "guia": guia, 
+                "resultado": estado.strip()
+            }
         
         except Exception as e:
-            # Imprimimos el error en los logs de Railway para debuguear
-            print(f"Error en scraping: {e}")
-            return {"status": "error", "message": "No se encontró el estado o la guía es inválida."}
-        
+            # Imprimimos el error real en los logs de Railway
+            print(f"--- ERROR DETECTADO ---")
+            print(traceback.format_exc())
+            
+            return {
+                "status": "error", 
+                "message": f"Error al consultar: {str(e)}"
+            }
         
         finally:
+            # Cerramos el navegador siempre
             browser.close()
