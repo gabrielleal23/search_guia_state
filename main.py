@@ -6,12 +6,12 @@ app = FastAPI()
 
 @app.get("/")
 def home():
-    return {"message": "Servidor de Rastreo Servientrega Activo"}
+    return {"message": "Servidor de Rastreo Activo"}
 
 @app.get("/rastrear/{guia}")
 def rastrear_servientrega(guia: str):
     with sync_playwright() as p:
-        # Lanzamiento con banderas para reducir la huella de automatización
+        # Lanzamiento con modo 'stealth' manual
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -21,40 +21,43 @@ def rastrear_servientrega(guia: str):
             ]
         )
         
-        # Simulamos un perfil de usuario real
+        # Simulamos una resolución y un User-Agent muy común
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={'width': 1280, 'height': 720}
+            viewport={'width': 1366, 'height': 768}
         )
         
         page = context.new_page()
         
         try:
-            # 1. Navegación con espera moderada
-            page.goto("https://www.servientrega.com/wps/portal/rastreo-envio", timeout=60000, wait_until="load")
+            # 1. Navegación con tiempo de espera extendido
+            page.goto("https://www.servientrega.com/wps/portal/rastreo-envio", 
+                      timeout=90000, 
+                      wait_until="networkidle") # Esperamos a que la red descanse
             
-            # 2. Espera a que el input sea interactuable
-            input_selector = 'input#txtGuia'
-            page.wait_for_selector(input_selector, timeout=20000)
-            page.fill(input_selector, guia)
+            # 2. Asegurarnos de que el input está listo
+            page.wait_for_selector('input#txtGuia', timeout=20000)
+            page.fill('input#txtGuia', guia)
             
-            # 3. Forzar el clic y esperar la respuesta de red
-            # A veces el botón necesita un pequeño delay para que el script de la página esté listo
-            page.wait_for_timeout(1000)
+            # 3. Pequeña pausa humana antes de clickear
+            page.wait_for_timeout(1500)
             page.click('button#btnConsultar')
             
-            # 4. CRUCIAL: Esperamos a que el label de estado cambie o aparezca
-            # Usamos un selector que busque el ID parcial ya que Servientrega usa portlets dinámicos
-            selector_estado = 'span[id*="lblEstadoActual"]'
+            # 4. CAMBIO CLAVE: Esperar a que la URL cambie o que el elemento aparezca
+            # Servientrega a veces recarga la página o actualiza un fragmento.
+            # Probamos con un selector que espera el texto que realmente nos importa
+            selector_final = '#lblEstadoActual' 
             
-            # Esperamos hasta 30 segundos porque el backend de Servientrega suele ser lento
-            page.wait_for_selector(selector_estado, timeout=30000)
+            # Esperamos que el elemento sea visible y no esté vacío
+            page.wait_for_selector(selector_final, timeout=40000, state="visible")
             
-            # 5. Extracción limpia
-            estado = page.locator(selector_estado).inner_text()
+            # Extraemos el contenido
+            estado = page.locator(selector_final).inner_text()
             
-            if not estado or len(estado.strip()) == 0:
-                return {"status": "error", "message": "Guía encontrada pero sin estado disponible."}
+            # Si el texto está vacío, puede que necesitemos esperar un poco más
+            if not estado.strip():
+                page.wait_for_timeout(2000)
+                estado = page.locator(selector_final).inner_text()
 
             return {
                 "status": "success",
@@ -63,11 +66,11 @@ def rastrear_servientrega(guia: str):
             }
             
         except Exception as e:
-            # Log detallado para ti en Railway
-            print(f"Error consultando guía {guia}: {str(e)}")
+            # Esto imprimirá el error real en los logs de Railway
+            print(f"Error detallado para guía {guia}: {traceback.format_exc()}")
             return {
                 "status": "error", 
-                "message": "No se pudo obtener el estado. Verifique que el número de guía sea correcto."
+                "message": f"Timeout o error de red: {str(e)[:100]}" 
             }
         
         finally:
