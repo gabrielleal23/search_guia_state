@@ -1,77 +1,55 @@
 from fastapi import FastAPI
-from playwright.sync_api import sync_playwright
+import requests
 import traceback
 
 app = FastAPI()
 
 @app.get("/")
 def home():
-    return {"message": "Servidor de Rastreo Activo"}
+    return {"message": "API Directa de Rastreo Activa"}
 
 @app.get("/rastrear/{guia}")
 def rastrear_servientrega(guia: str):
-    with sync_playwright() as p:
-        # Lanzamiento con modo 'stealth' manual
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox", 
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled"
-            ]
-        )
-        
-        # Simulamos una resolución y un User-Agent muy común
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={'width': 1366, 'height': 768}
-        )
-        
-        page = context.new_page()
-        
-        try:
-            # 1. Navegación con tiempo de espera extendido
-            page.goto("https://mobile.servientrega.com/WebSitePortal/RastreoEnvio.html", 
-                      timeout=90000, 
-                      wait_until="networkidle") # Esperamos a que la red descanse
-            
-            # 2. Asegurarnos de que el input está listo
-            page.wait_for_selector('input#txtGuia', timeout=20000)
-            page.fill('input#txtGuia', guia)
-            
-            # 3. Pequeña pausa humana antes de clickear
-            page.wait_for_timeout(1500)
-            page.click('button#btnConsultar')
-            
-            # 4. CAMBIO CLAVE: Esperar a que la URL cambie o que el elemento aparezca
-            # Servientrega a veces recarga la página o actualiza un fragmento.
-            # Probamos con un selector que espera el texto que realmente nos importa
-            selector_final = '#lblEstadoActual' 
-            
-            # Esperamos que el elemento sea visible y no esté vacío
-            page.wait_for_selector(selector_final, timeout=40000, state="visible")
-            
-            # Extraemos el contenido
-            estado = page.locator(selector_final).inner_text()
-            
-            # Si el texto está vacío, puede que necesitemos esperar un poco más
-            if not estado.strip():
-                page.wait_for_timeout(2000)
-                estado = page.locator(selector_final).inner_text()
+    # Esta es la URL de la API interna que descubriste
+    # Usamos la estructura que viste en el tráfico de red
+    api_url = f"https://www.servientrega.com/wps/portal/rastreo-envio/Services/ShipmentTracking/api/confirmation/{guia}/1"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://www.servientrega.com/wps/portal/rastreo-envio",
+        "X-Requested-With": "XMLHttpRequest"
+    }
 
+    try:
+        # Hacemos la petición directa a la API
+        response = requests.get(api_url, headers=headers, timeout=15)
+        
+        # Si la API responde correctamente
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Nota: Aquí asumo que la API devuelve un JSON. 
+            # Según la URL, debería traer la información del envío.
+            # Ajustamos el mapeo según lo que devuelva la API (usualmente 'Estado' o 'UltimoEstado')
+            
+            # Ejemplo de extracción basada en APIs comunes de Servientrega:
+            estado = data.get("EstadoActual") or data.get("Movimiento") or "Información no disponible"
+            
             return {
                 "status": "success",
                 "guia": guia,
-                "resultado": estado.strip()
+                "resultado": estado,
+                "detalles": data # Esto te sirve para ver todo lo que devuelve
             }
-            
-        except Exception as e:
-            # Esto imprimirá el error real en los logs de Railway
-            print(f"Error detallado para guía {guia}: {traceback.format_exc()}")
+        else:
             return {
-                "status": "error", 
-                "message": f"Timeout o error de red: {str(e)[:100]}" 
+                "status": "error",
+                "message": f"Servidor de Servientrega respondió con error {response.status_code}"
             }
-        
-        finally:
-            browser.close()
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": "No se pudo conectar con la API de Servientrega."
+        }
