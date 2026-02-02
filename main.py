@@ -31,7 +31,7 @@ def rastrear_servientrega(guia: str):
         
         try:
             # 1. Navegación con tiempo de espera extendido
-            page.goto("https://www.servientrega.com/wps/portal/rastreo-envio", 
+            page.goto("https://mobile.servientrega.com/WebSitePortal/RastreoEnvio.html", 
                       timeout=90000, 
                       wait_until="networkidle") # Esperamos a que la red descanse
             
